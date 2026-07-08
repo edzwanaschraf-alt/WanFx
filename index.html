@@ -53,7 +53,42 @@ function syncTrade(t){if(user&&db)db.collection('users').doc(user.uid).collectio
 function uploadLocalToCloud(){if(!user||!db){alert('Login Google dulu');return}Promise.all(trades.map(t=>db.collection('users').doc(user.uid).collection('trades').doc(t.id).set(t,{merge:true}))).then(()=>syncSettings()).then(()=>alert('Local data dah upload ke cloud')).catch(e=>alert(e.message))}
 function downloadCloud(){if(!user||!db){alert('Login Google dulu');return}listenCloud();alert('Cloud sync aktif')}
 function parseCsv(text){const rows=text.split(/\r?\n/).filter(Boolean).map(r=>r.split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/).map(c=>c.replace(/^"|"$/g,'').trim()));const head=rows.shift().map(h=>h.toLowerCase());return rows.map((r,i)=>rowToTrade(Object.fromEntries(head.map((h,j)=>[h,r[j]||''])),i)).filter(Boolean)}
-function parseHtml(text){const doc=new DOMParser().parseFromString(text,'text/html');const trs=[...doc.querySelectorAll('tr')];let out=[];trs.forEach((tr,i)=>{const cells=[...tr.children].map(td=>td.textContent.trim());if(cells.length>=8){const joined=cells.join(' ').toLowerCase();if(/(buy|sell)/.test(joined)&&/xau|gold|btc|usd|eur|gbp|jpy|nas|us30/i.test(joined)){let obj={};cells.forEach((v,idx)=>obj['c'+idx]=v);const p=cells.map(x=>Number(String(x).replace(/[, ]/g,''))).filter(n=>!isNaN(n));const profit=p.length?p[p.length-1]:0;out.push({id:'i_'+Date.now()+'_'+i,date:guessDate(cells.join(' ')),ea:'Imported MT5',symbol:guessSymbol(cells.join(' ')),type:/sell/i.test(joined)?'sell':'buy',lot:guessLot(cells),profit,entry:'',close:'',result:profit>=0?'win':'loss',ticket:cells[0]||'',note:'Imported HTML',source:'mt5-html'})}});return dedupe(out)}
+function parseHtml(text){
+  const doc=new DOMParser().parseFromString(text,'text/html');
+  const trs=[...doc.querySelectorAll('tr')];
+  let out=[];
+
+  trs.forEach((tr,i)=>{
+    const cells=[...tr.children].map(td=>td.textContent.trim());
+
+    if(cells.length>=8){
+      const joined=cells.join(' ').toLowerCase();
+
+      if(/(buy|sell)/.test(joined)&&/xau|gold|btc|usd|eur|gbp|jpy|nas|us30/i.test(joined)){
+        const p=cells.map(x=>Number(String(x).replace(/[, ]/g,''))).filter(n=>!isNaN(n));
+        const profit=p.length?p[p.length-1]:0;
+
+        out.push({
+          id:'i_'+Date.now()+'_'+i,
+          date:guessDate(cells.join(' ')),
+          ea:'Imported MT5',
+          symbol:guessSymbol(cells.join(' ')),
+          type:/sell/i.test(joined)?'sell':'buy',
+          lot:guessLot(cells),
+          profit,
+          entry:'',
+          close:'',
+          result:profit>=0?'win':'loss',
+          ticket:cells[0]||'',
+          note:'Imported HTML',
+          source:'mt5-html'
+        });
+      }
+    }
+  });
+
+  return dedupe(out);
+}
 function guessDate(s){const m=s.match(/\d{4}[.\/-]\d{2}[.\/-]\d{2}/)||s.match(/\d{2}[.\/-]\d{2}[.\/-]\d{4}/);if(!m)return today();let x=m[0].replace(/[.]/g,'-');if(/^\d{2}-/.test(x)){const [d,mo,y]=x.split('-');return y+'-'+mo+'-'+d}return x.slice(0,10)}function guessSymbol(s){const m=s.match(/\b(XAUUSD|GOLD|BTCUSD|US30|NAS100|EURUSD|GBPUSD|USDJPY)\b/i);return m?m[1].toUpperCase():'XAUUSD'}function guessLot(arr){for(const c of arr){const n=Number(String(c).replace(',','.'));if(n>0&&n<100)return n}return ''}
 function rowToTrade(o,i){const symbol=o.symbol||o.pair||o['']||o.market||guessSymbol(Object.values(o).join(' '));const profit=Number((o.profit||o.pnl||o['profit/loss']||o.p_l||0).replace?.(/[, ]/g,'')||0);const type=(o.type||o.side||o.direction||'buy').toLowerCase().includes('sell')?'sell':'buy';return{id:'c_'+Date.now()+'_'+i,date:(o.date||o['close time']||o.time||today()).slice(0,10).replace(/[.]/g,'-'),ea:o.ea||'Imported MT5',symbol,type,lot:Number(o.lot||o.size||o.volume)||'',profit,entry:o.entry||o['open price']||'',close:o.close||o['close price']||'',result:profit>=0?'win':'loss',ticket:o.ticket||o.order||'',note:'Imported CSV',source:'mt5-csv'}}function dedupe(a){const seen=new Set();return a.filter(t=>{const k=(t.ticket||'')+'_'+t.date+'_'+t.profit+'_'+t.symbol;if(seen.has(k))return false;seen.add(k);return true})}
 function importMt5(mode){const file=document.getElementById('importFile').files[0];if(!file){alert('Pilih file dulu');return}const r=new FileReader();r.onload=e=>{const text=e.target.result;let imported=file.name.toLowerCase().endsWith('.csv')?parseCsv(text):parseHtml(text);if(!imported.length){alert('Tak jumpa trade dalam file. Cuba Detailed Report HTML.');return}trades=mode==='replace'?imported:[...trades,...imported];saveLocal();if(user)uploadLocalToCloud();document.getElementById('importPreview').innerHTML='<p class="muted">Imported '+imported.length+' trades.</p>';closeImport()};r.readAsText(file)}
